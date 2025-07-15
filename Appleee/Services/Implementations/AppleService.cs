@@ -39,119 +39,136 @@ namespace ORAA.Services.Implementations
             _context = context;
             _jWTService = jWTService;
         }
-        public async Task<ApiResponse<AppleTokenResponseDTO>> AppleLogin(AppleUser request)
+        public async Task<ApiResponse<AppleTokenResponseDTO>> AppleLogin(AppleAuthRequest request)
         {
-            var AppleclientId = "com.mghebro.si";
-            var teamId = "TTFPHSNRGQ";
-            var keyId = "ZR62KJ2BYT";
-            var privateKeyPath = "Certificate/AuthKey_ZR62KJ2BYT.p8";
-
-            var clientSecret = GenerateClientSecret(teamId, AppleclientId, keyId, privateKeyPath);
-
-            var parameters = new Dictionary<string, string>
-        {
-            {"client_id", AppleclientId },
-            {"client_secret", clientSecret },
-            {"code", request.Code },
-            {"grant_type", "authorization_code" },
-            {"redirect_uri", request.RedirectUri }
-        };
-
-            var content = new FormUrlEncodedContent(parameters);
-            var response = await _httpClient.PostAsync("https://appleid.apple.com/auth/token", content);
-
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                var errorContent = await response.Content.ReadAsStringAsync();
-                return new ApiResponse<AppleTokenResponseDTO>
+                var AppleclientId = "com.mghebro.si";
+                var teamId = "TTFPHSNRGQ";
+                var keyId = "ZR62KJ2BYT";
+                var privateKeyPath = Path.Combine(Directory.GetCurrentDirectory(), "Core", "Certificate", "AuthKey_ZR62KJ2BYT.p8");
+
+                var clientSecret = GenerateClientSecret(teamId, AppleclientId, keyId, privateKeyPath);
+
+                var parameters = new Dictionary<string, string>
+                    {
+                        {"client_id", AppleclientId },
+                        {"client_secret", clientSecret },
+                        {"code", request.Code },
+                        {"grant_type", "authorization_code" },
+                        {"redirect_uri", request.RedirectUri }
+                    };
+
+                var content = new FormUrlEncodedContent(parameters);
+                var response = await _httpClient.PostAsync("https://appleid.apple.com/auth/token", content);
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    Status = (int)response.StatusCode,
-                    Message = $"Apple authentication failed: {errorContent}",
-                    Data = null
-                };
-            }
-
-            var responseString = await response.Content.ReadAsStringAsync();
-            var tokenResponse = JsonSerializer.Deserialize<AppleTokenResponse>(responseString,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            // Decode the ID token
-            var handler = new JwtSecurityTokenHandler();
-            var jwtToken = handler.ReadJwtToken(tokenResponse.id_token);
-            var payload = JsonSerializer.Deserialize<AppleIdTokenPayload>(
-                JsonSerializer.Serialize(jwtToken.Payload),
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            // Find or create user
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.AppleId == payload.sub ||
-                                         (u.Email == payload.email && u.EmailConfirmed));
-
-            if (user == null)
-            {
-                // Create new user
-                user = new User
-                {
-                    UserName = payload.email,
-                    Email = payload.email,
-                    AppleId = payload.sub,
-                    EmailConfirmed = true,
-                    IsVerified = true,
-                    FirstName = "", // Apple might provide this in the first login
-                    LastName = "",  // Apple might provide this in the first login
-                    Status = ACCOUNT_STATUS.VERIFIED,
-                    Role = ROLES.USER,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    IsActive = true
-                };
-
-                var createResult = await _userManager.CreateAsync(user);
-                if (!createResult.Succeeded)
-                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
                     return new ApiResponse<AppleTokenResponseDTO>
                     {
-                        Status = StatusCodes.Status400BadRequest,
-                        Message = "Failed to create user account",
+                        Status = (int)response.StatusCode,
+                        Message = $"Apple authentication failed: {errorContent}",
                         Data = null
                     };
                 }
-            }
-            else
-            {
-                // Update existing user
-                if (string.IsNullOrEmpty(user.AppleId))
+
+                var responseString = await response.Content.ReadAsStringAsync();
+                var tokenResponse = JsonSerializer.Deserialize<AppleTokenResponse>(responseString,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                // Decode the ID token
+                var handler = new JwtSecurityTokenHandler();
+                var jwtToken = handler.ReadJwtToken(tokenResponse.id_token);
+                var payload = JsonSerializer.Deserialize<AppleIdTokenPayload>(
+                    JsonSerializer.Serialize(jwtToken.Payload),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                // Find or create user
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.AppleId == payload.sub ||
+                                             (u.Email == payload.email && u.EmailConfirmed));
+
+                if (user == null)
                 {
-                    user.AppleId = payload.sub;
+                    // Create new user
+                    user = new User
+                    {
+                        UserName = payload.email ?? $"apple_{payload.sub}",
+                        Email = payload.email,
+                        AppleId = payload.sub,
+                        EmailConfirmed = payload.email_verified,
+                        IsVerified = true,
+                        FirstName = request.Name?.Split(' ').FirstOrDefault() ?? "",
+                        LastName = request.Name?.Split(' ').Skip(1).FirstOrDefault() ?? "",
+                        Status = ACCOUNT_STATUS.VERIFIED,
+                        Role = ROLES.USER,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                        IsActive = true
+                    };
+
+                    var createResult = await _userManager.CreateAsync(user);
+                    if (!createResult.Succeeded)
+                    {
+                        return new ApiResponse<AppleTokenResponseDTO>
+                        {
+                            Status = StatusCodes.Status400BadRequest,
+                            Message = "Failed to create user account: " + string.Join(", ", createResult.Errors.Select(e => e.Description)),
+                            Data = null
+                        };
+                    }
+                }
+                else
+                {
+                    // Update existing user
+                    if (string.IsNullOrEmpty(user.AppleId))
+                    {
+                        user.AppleId = payload.sub;
+                    }
+
+                    user.LastLoginAt = DateTime.UtcNow;
+                    user.UpdatedAt = DateTime.UtcNow;
+
+                    await _userManager.UpdateAsync(user);
                 }
 
-                user.LastLoginAt = DateTime.UtcNow;
-                user.UpdatedAt = DateTime.UtcNow;
+                // Generate your app's JWT token
+                var userToken = _jWTService.GetUserToken(user);
+                var refreshToken = _jWTService.GenerateRefreshToken();
 
+                // Save refresh token
+                user.RefreshToken = refreshToken;
+                user.RefreshTokenExpiresAtUtc = DateTime.UtcNow.AddDays(30);
                 await _userManager.UpdateAsync(user);
+
+                // Create the response DTO
+                var appleTokenResponseDTO = new AppleTokenResponseDTO
+                {
+                    Email = user.Email,
+                    AppleId = user.AppleId,
+                    AccessToken = userToken.Token,
+                    RefreshToken = refreshToken
+                };
+
+                return new ApiResponse<AppleTokenResponseDTO>
+                {
+                    Data = appleTokenResponseDTO,
+                    Status = StatusCodes.Status200OK,
+                    Message = "Login successful"
+                };
             }
-
-            // Generate your app's JWT token
-            var userToken = _jWTService.GetUserToken(user);
-            var refreshToken = _jWTService.GenerateRefreshToken();
-
-            // Create the response DTO
-            var appleTokenResponseDTO = new AppleTokenResponseDTO
+            catch (Exception ex)
             {
-                Email = user.Email,
-                AppleId = user.AppleId,
-                AccessToken = userToken.Token,
-                RefreshToken = tokenResponse.refresh_token // Store this securely if needed
-            };
-
-            return new ApiResponse<AppleTokenResponseDTO>
-            {
-                Data = appleTokenResponseDTO,
-                Status = StatusCodes.Status200OK,
-                Message = "Login successful"
-            };
+                return new ApiResponse<AppleTokenResponseDTO>
+                {
+                    Status = StatusCodes.Status500InternalServerError,
+                    Message = $"Internal server error: {ex.Message}",
+                    Data = null
+                };
+            }
         }
-        
+
         public static string GenerateClientSecret(string teamId, string clientId, string keyId, string privateKeyPath)
         {
                 var privateKeyText = System.IO.File.ReadAllText(privateKeyPath)

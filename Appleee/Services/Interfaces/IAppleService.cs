@@ -6,8 +6,7 @@ namespace ORAA.Services.Interfaces
 {
     public interface IAppleService
     {
-        Task<ApiResponse<AppleTokenResponseDTO>> AppleLogin(AppleUser request);
+        Task<ApiResponse<AppleTokenResponseDTO>> AppleLogin(AppleAuthRequest request);
         Task<string> ValidateApplePaySessionAsync(string validationUrl);
-
     }
 }

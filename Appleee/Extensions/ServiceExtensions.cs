@@ -103,17 +103,17 @@ public static class ServiceExtensions
             options.DefaultSignInScheme = JwtBearerDefaults.AuthenticationScheme;
         })
             .AddCookie()
-            .AddGoogle(options =>
-            {
-                var clientId = configuration["Authentication:Google:ClientId"] ??
-                    throw new ArgumentNullException("Authentication:Google:ClientId");
-                var clientSecret = configuration["Authentication:Google:ClientSecret"] ??
-                    throw new ArgumentNullException("Authentication:Google:ClientSecret");
+            //.AddGoogle(options =>
+            //{
+            //    var clientId = configuration["Authentication:Google:ClientId"] ??
+            //        throw new ArgumentNullException("Authentication:Google:ClientId");
+            //    var clientSecret = configuration["Authentication:Google:ClientSecret"] ??
+            //        throw new ArgumentNullException("Authentication:Google:ClientSecret");
 
-                options.ClientId = clientId;
-                options.ClientSecret = clientSecret;
-                options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-            })
+            //    options.ClientId = clientId;
+            //    options.ClientSecret = clientSecret;
+            //    options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            //})
             .AddJwtBearer(options =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters

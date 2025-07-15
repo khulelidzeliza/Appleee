@@ -14,17 +14,18 @@ namespace ORAA.Controllers
         private readonly HttpClient _httpClient = new HttpClient();
         private readonly IAppleService _appleService;
         private readonly DataContext _context;
-        public AppleServiceController(IAppleService applePayment , DataContext context)
+
+        public AppleServiceController(IAppleService applePayment, DataContext context)
         {
             _appleService = applePayment;
             _context = context;
         }
 
-        [HttpGet("AppleService/apple1")]
+        [HttpGet("apple/login")]
         public IActionResult StartAppleLogin()
         {
             var clientId = "com.mghebro.si";
-            var redirectUri = "https://mghebro-auth-test.netlify.app/auth/apple/callback"; //front
+            var redirectUri = "https://mghebro-auth-test.netlify.app/auth/apple/callback";
             var scope = "name email";
 
             var url = $"https://appleid.apple.com/auth/authorize?" +
@@ -34,22 +35,27 @@ namespace ORAA.Controllers
                       $"response_mode=form_post&" +
                       $"scope={scope}";
 
-            if (_context.Users.Any(u => u.AppleId != null ))
-            {
-                return Conflict("User already exists.");
-            }
-
-
             return Redirect(url);
         }
 
         [HttpPost("auth/apple-callback")]
-        public async Task<IActionResult> AppleLogin([FromBody] AppleAuthRequest request)
+        public async Task<IActionResult> AppleCallback([FromBody] AppleAuthRequest request)
         {
-            var dataToReturn = _appleService.AppleLogin(request);
+            try
+            {
+                // Check if user already exists
+                if (await _context.Users.AnyAsync(u => u.AppleId == request.AppleId))
+                {
+                    return Conflict(new { message = "User already exists." });
+                }
 
-            return Ok(dataToReturn);
+                var result = await _appleService.AppleLogin(request);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
-       
     }
 }
