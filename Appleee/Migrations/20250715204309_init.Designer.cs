@@ -12,7 +12,7 @@ using ORAA.Data;
 namespace Appleee.Migrations
 {
     [DbContext(typeof(DataContext))]
-    [Migration("20250715150458_init")]
+    [Migration("20250715204309_init")]
     partial class init
     {
         /// <inheritdoc />
