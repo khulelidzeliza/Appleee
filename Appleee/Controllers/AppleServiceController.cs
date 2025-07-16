@@ -7,74 +7,36 @@ using ORAA.Services.Interfaces;
 
 namespace ORAA.Controllers
 {
-    [ApiController]
     [Route("api/[controller]")]
+    [ApiController]
     public class AppleServiceController : ControllerBase
     {
-        private readonly HttpClient _httpClient = new HttpClient();
         private readonly IAppleService _appleService;
         private readonly DataContext _context;
         private readonly ILogger<AppleServiceController> _logger;
 
-        public AppleServiceController(IAppleService applePayment, DataContext context, ILogger<AppleServiceController> logger)
+        public AppleServiceController(IAppleService appleService, DataContext context, ILogger<AppleServiceController> logger)
         {
-            _appleService = applePayment;
+            _appleService = appleService;
             _context = context;
             _logger = logger;
-        }
-
-        // Test endpoint to verify the API is working
-        [HttpGet("test")]
-        public IActionResult Test()
-        {
-            _logger.LogInformation("Test endpoint called");
-            return Ok(new
-            {
-                message = "C# Apple Service API is working",
-                timestamp = DateTime.UtcNow,
-                version = "1.0",
-                environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown"
-            });
-        }
-
-        // Alternative test endpoint
-        [HttpGet]
-        public IActionResult Get()
-        {
-            return Ok(new
-            {
-                message = "Apple Service Controller is running",
-                availableEndpoints = new[] {
-                    "GET /api/AppleService/test",
-                    "GET /api/AppleService/apple/login",
-                    "POST /api/AppleService/auth/apple-callback"
-                }
-            });
         }
 
         [HttpGet("apple/login")]
         public IActionResult StartAppleLogin()
         {
-            try
-            {
-                var clientId = "com.mghebro.si";
-                var redirectUri = "https://mghebro-auth-test.netlify.app/auth/apple/callback";
-                var scope = "name email";
+            var clientId = "com.mghebro.si";
+            var redirectUri = "https://mghebro-auth-test-angular.netlify.app/.netlify/functions/server";
+            var scope = "name email";
 
-                var url = $"https://appleid.apple.com/auth/authorize?" +
-                          $"client_id={clientId}&" +
-                          $"redirect_uri={Uri.EscapeDataString(redirectUri)}&" +
-                          $"response_type=code&" +
-                          $"response_mode=form_post&" +
-                          $"scope={scope}";
+            var url = $"https://appleid.apple.com/auth/authorize?" +
+                      $"client_id={clientId}&" +
+                      $"redirect_uri={Uri.EscapeDataString(redirectUri)}&" +
+                      $"response_type=code&" +
+                      $"response_mode=form_post&" +
+                      $"scope={scope}";
 
-                return Redirect(url);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in StartAppleLogin");
-                return BadRequest(new { message = ex.Message });
-            }
+            return Redirect(url);
         }
 
         [HttpPost("auth/apple-callback")]
@@ -82,98 +44,73 @@ namespace ORAA.Controllers
         {
             try
             {
-                _logger.LogInformation("Apple callback received");
-                _logger.LogInformation("Request data: {Request}", System.Text.Json.JsonSerializer.Serialize(request));
-
-                // Validate the request
-                if (request == null)
-                {
-                    _logger.LogWarning("Null request received");
-                    return BadRequest(new { message = "Request body is null" });
-                }
+                _logger.LogInformation("Apple callback received for AppleId: {AppleId}", request.AppleId);
 
                 // Validate required fields
                 if (string.IsNullOrEmpty(request.AppleId))
                 {
-                    _logger.LogWarning("Apple ID is missing from request");
-                    return BadRequest(new { message = "Apple ID is required" });
+                    _logger.LogWarning("Apple callback missing AppleId");
+                    return BadRequest(new { message = "AppleId is required" });
                 }
 
-                // Check if user already exists
-                var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.AppleId == request.AppleId);
+                // Check if user already exists by AppleId first, then by email
+                var existingUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.AppleId == request.AppleId ||
+                                            (u.Email == request.Email && !string.IsNullOrEmpty(request.Email)));
+
                 if (existingUser != null)
                 {
-                    _logger.LogInformation("Existing user found: {UserId}", existingUser.Id);
+                    _logger.LogWarning("User already exists with AppleId: {AppleId} or Email: {Email}",
+                        request.AppleId, request.Email);
 
-                    // User exists, update last login and return success
-                    existingUser.LastLoginAt = DateTime.UtcNow;
-                    await _context.SaveChangesAsync();
+                    // Update the redirect URI for consistency
+                    request.RedirectUri = "https://mghebro-auth-test-angular.netlify.app/.netlify/functions/server";
 
-                    return Ok(new
+                    // Still process the login even if user exists
+                    var loginResult = await _appleService.AppleLogin(request);
+
+                    if (loginResult.Status == 200)
                     {
-                        status = 200,
-                        message = "User already exists and logged in successfully.",
-                        data = new
-                        {
-                            accessToken = "existing-user-token-" + Guid.NewGuid().ToString("N")[..16], // Generate actual JWT here
-                            email = existingUser.Email,
-                            appleId = existingUser.AppleId,
-                            isNewUser = false
-                        }
-                    });
+                        return Ok(loginResult.Data);
+                    }
+                    else
+                    {
+                        return StatusCode(loginResult.Status, new { message = loginResult.Message });
+                    }
                 }
 
-                // Process new user registration
-                _logger.LogInformation("Processing new user registration");
+                // Set the correct redirect URI
+                request.RedirectUri = "https://mghebro-auth-test-angular.netlify.app/.netlify/functions/server";
+
                 var result = await _appleService.AppleLogin(request);
 
-                _logger.LogInformation("Apple service result: {Result}", System.Text.Json.JsonSerializer.Serialize(result));
-
-                return Ok(result);
+                if (result.Status == 200)
+                {
+                    _logger.LogInformation("Apple login successful for AppleId: {AppleId}", request.AppleId);
+                    return Ok(result.Data);
+                }
+                else
+                {
+                    _logger.LogError("Apple login failed for AppleId: {AppleId}. Status: {Status}, Message: {Message}",
+                        request.AppleId, result.Status, result.Message);
+                    return StatusCode(result.Status, new { message = result.Message });
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in AppleCallback: {Message}", ex.Message);
-
+                _logger.LogError(ex, "Error processing Apple callback for AppleId: {AppleId}", request.AppleId);
                 return StatusCode(500, new
                 {
-                    message = ex.Message,
-                    timestamp = DateTime.UtcNow,
-                    details = ex.InnerException?.Message,
-                    type = ex.GetType().Name
+                    message = "Internal server error during Apple authentication",
+                    error = ex.Message
                 });
             }
         }
 
-        // Handle preflight requests for CORS
         [HttpOptions("auth/apple-callback")]
         public IActionResult PreflightAppleCallback()
         {
-            _logger.LogInformation("CORS preflight request received");
             return Ok();
-        }
-
-        // Catch-all for debugging routing issues
-        [HttpPost("debug")]
-        [HttpGet("debug")]
-        public IActionResult Debug()
-        {
-            var requestInfo = new
-            {
-                Method = Request.Method,
-                Path = Request.Path,
-                Query = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString()),
-                Headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()),
-                ContentType = Request.ContentType,
-                ContentLength = Request.ContentLength
-            };
-
-            return Ok(new
-            {
-                message = "Debug endpoint hit",
-                timestamp = DateTime.UtcNow,
-                request = requestInfo
-            });
         }
     }
 }

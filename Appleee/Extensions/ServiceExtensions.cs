@@ -1,5 +1,4 @@
-﻿
-using System.Text;
+﻿using System.Text;
 using System.Text.Json.Serialization;
 using FluentValidation;
 using FluentValidation.AspNetCore;
@@ -42,7 +41,7 @@ public static class ServiceExtensions
 
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
-        
+
         return services;
     }
 
@@ -77,9 +76,9 @@ public static class ServiceExtensions
         services.AddScoped<IUserService, UserService>();
 
         // Apple payment service
-             services.AddScoped<IAppleService, AppleService>();
-             services.AddHttpClient<IAppleService, AppleService>();
-            services.AddScoped<AppleUser>();
+        services.AddScoped<IAppleService, AppleService>();
+        services.AddHttpClient<IAppleService, AppleService>();
+        services.AddScoped<AppleUser>();
 
         // Stripe payment service
 
@@ -103,17 +102,6 @@ public static class ServiceExtensions
             options.DefaultSignInScheme = JwtBearerDefaults.AuthenticationScheme;
         })
             .AddCookie()
-            //.AddGoogle(options =>
-            //{
-            //    var clientId = configuration["Authentication:Google:ClientId"] ??
-            //        throw new ArgumentNullException("Authentication:Google:ClientId");
-            //    var clientSecret = configuration["Authentication:Google:ClientSecret"] ??
-            //        throw new ArgumentNullException("Authentication:Google:ClientSecret");
-
-            //    options.ClientId = clientId;
-            //    options.ClientSecret = clientSecret;
-            //    options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-            //})
             .AddJwtBearer(options =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters
@@ -152,11 +140,34 @@ public static class ServiceExtensions
         services.AddFluentValidationAutoValidation();
         services.AddValidatorsFromAssemblyContaining<Program>();
 
+        // UPDATED CORS CONFIGURATION - This is where you add the new CORS settings
         services.AddCors(options =>
         {
             options.AddDefaultPolicy(builder =>
             {
-                builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+                builder
+                    .WithOrigins(
+                        "https://mghebro-auth-test-angular.netlify.app",
+                        "https://mghebro-auth-test.netlify.app",
+                        "http://localhost:4200",  // For local development
+                        "https://localhost:4200"  // For local HTTPS development
+                    )
+                    .AllowAnyHeader()
+                    .AllowAnyMethod()
+                    .AllowCredentials();
+            });
+
+            // You can also add a named policy for more specific scenarios
+            options.AddPolicy("AppleAuthPolicy", builder =>
+            {
+                builder
+                    .WithOrigins(
+                        "https://mghebro-auth-test-angular.netlify.app",
+                        "https://mghebro-auth-test.netlify.app"
+                    )
+                    .WithHeaders("Content-Type", "Authorization", "ngrok-skip-browser-warning")
+                    .WithMethods("GET", "POST", "OPTIONS")
+                    .AllowCredentials();
             });
         });
 
