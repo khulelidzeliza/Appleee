@@ -2,8 +2,9 @@
 
 public class AppleAuthRequest
 {
-    public string Code { get; set; }            // authorization code from frontend - REQUIRED!
-    public string RedirectUri { get; set; }     // must match the one used in frontend
+    // Remove the authorization code since it's already been used
+    // public string Code { get; set; }           
+    // public string RedirectUri { get; set; }    
 
     public string AppleId { get; set; }         // Apple's unique user identifier
     public string? Email { get; set; }          // User's email (if provided)

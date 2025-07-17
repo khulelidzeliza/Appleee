@@ -18,7 +18,12 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 // Enable CORS before other middleware
-app.UseCors();
+app.UseCors(policy =>
+{
+    policy.AllowAnyOrigin()
+          .AllowAnyMethod()
+          .AllowAnyHeader();
+});
 
 app.UseHttpsRedirection();
 
