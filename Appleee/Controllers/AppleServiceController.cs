@@ -44,14 +44,31 @@ namespace ORAA.Controllers
         {
             try
             {
-                _logger.LogInformation("Apple callback received for AppleId: {AppleId}", request.AppleId);
+                _logger.LogInformation("Apple callback received. Code: {HasCode}, AppleId: {AppleId}, Email: {Email}",
+                    !string.IsNullOrEmpty(request?.Code), request?.AppleId ?? "null", request?.Email ?? "null");
+
+                // Validate request
+                if (request == null)
+                {
+                    _logger.LogWarning("Apple callback request is null");
+                    return BadRequest(new { message = "Request body is required" });
+                }
 
                 // Validate required fields
+                if (string.IsNullOrEmpty(request.Code))
+                {
+                    _logger.LogWarning("Apple callback missing authorization code");
+                    return BadRequest(new { message = "Authorization code is required" });
+                }
+
                 if (string.IsNullOrEmpty(request.AppleId))
                 {
                     _logger.LogWarning("Apple callback missing AppleId");
                     return BadRequest(new { message = "AppleId is required" });
                 }
+
+                // Set the correct redirect URI
+                request.RedirectUri = "https://mghebro-auth-test-angular.netlify.app/.netlify/functions/server";
 
                 // Check if user already exists by AppleId first, then by email
                 var existingUser = await _context.Users
@@ -60,13 +77,10 @@ namespace ORAA.Controllers
 
                 if (existingUser != null)
                 {
-                    _logger.LogWarning("User already exists with AppleId: {AppleId} or Email: {Email}",
+                    _logger.LogInformation("User already exists with AppleId: {AppleId} or Email: {Email}",
                         request.AppleId, request.Email);
 
-                    // Update the redirect URI for consistency
-                    request.RedirectUri = "https://mghebro-auth-test-angular.netlify.app/.netlify/functions/server";
-
-                    // Still process the login even if user exists
+                    // Still process the login even if user exists - this will update the login time
                     var loginResult = await _appleService.AppleLogin(request);
 
                     if (loginResult.Status == 200)
@@ -78,9 +92,6 @@ namespace ORAA.Controllers
                         return StatusCode(loginResult.Status, new { message = loginResult.Message });
                     }
                 }
-
-                // Set the correct redirect URI
-                request.RedirectUri = "https://mghebro-auth-test-angular.netlify.app/.netlify/functions/server";
 
                 var result = await _appleService.AppleLogin(request);
 
@@ -98,7 +109,7 @@ namespace ORAA.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing Apple callback for AppleId: {AppleId}", request.AppleId);
+                _logger.LogError(ex, "Error processing Apple callback for AppleId: {AppleId}", request?.AppleId);
                 return StatusCode(500, new
                 {
                     message = "Internal server error during Apple authentication",
@@ -107,10 +118,17 @@ namespace ORAA.Controllers
             }
         }
 
-        [HttpOptions("auth/apple-callback")]
-        public IActionResult PreflightAppleCallback()
+       
+
+        // Test endpoint to verify API is working
+        [HttpGet("test")]
+        public IActionResult Test()
         {
-            return Ok();
+            return Ok(new
+            {
+                message = "Apple Service API is working",
+                timestamp = DateTime.UtcNow
+            });
         }
     }
 }
