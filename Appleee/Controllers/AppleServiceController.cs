@@ -99,31 +99,56 @@ namespace ORAA.Controllers
                     return BadRequest(new { message = "Apple ID is required" });
                 }
 
-                // Check if user already exists
-                var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.AppleId == request.AppleId);
+                // FIXED: Use the same user lookup logic as the service
+                // Check for existing user by AppleId OR by email (for users who previously registered with email)
+                var existingUser = await _context.Users.FirstOrDefaultAsync(u =>
+                    u.AppleId == request.AppleId ||
+                    (u.Email == request.Email && u.EmailConfirmed && !string.IsNullOrEmpty(request.Email)));
+
                 if (existingUser != null)
                 {
                     _logger.LogInformation("Existing user found: {UserId}", existingUser.Id);
 
-                    // User exists, update last login and return success
+                    // FIXED: Ensure AppleId is set if user was found by email
+                    if (string.IsNullOrEmpty(existingUser.AppleId))
+                    {
+                        existingUser.AppleId = request.AppleId;
+                        _logger.LogInformation("Updated user {UserId} with AppleId", existingUser.Id);
+                    }
+
+                    // FIXED: Update both LastLoginAt and UpdatedAt
                     existingUser.LastLoginAt = DateTime.UtcNow;
-                    await _context.SaveChangesAsync();
+                    existingUser.UpdatedAt = DateTime.UtcNow;
+
+                    // FIXED: Save changes and check for errors
+                    try
+                    {
+                        var saveResult = await _context.SaveChangesAsync();
+                        _logger.LogInformation("Successfully updated LastLoginAt for user {UserId}. Rows affected: {RowsAffected}",
+                            existingUser.Id, saveResult);
+                    }
+                    catch (Exception saveEx)
+                    {
+                        _logger.LogError(saveEx, "Failed to save LastLoginAt for user {UserId}", existingUser.Id);
+                        throw;
+                    }
 
                     return Ok(new
                     {
                         status = 200,
-                        message = "User already exists and logged in successfully.",
+                        message = "User logged in successfully",
                         data = new
                         {
                             accessToken = "existing-user-token-" + Guid.NewGuid().ToString("N")[..16], // Generate actual JWT here
                             email = existingUser.Email,
                             appleId = existingUser.AppleId,
-                            isNewUser = false
+                            isNewUser = false,
+                            lastLoginAt = existingUser.LastLoginAt
                         }
                     });
                 }
 
-                // Process new user registration
+                // Process new user registration through service
                 _logger.LogInformation("Processing new user registration");
                 var result = await _appleService.AppleLogin(request);
 
